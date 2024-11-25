@@ -1,3 +1,5 @@
 node_modules/
 
 .env
+tasks.json
+folders.json

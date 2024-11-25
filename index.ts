@@ -1,59 +1,37 @@
-import axios from 'axios';
-import { promises as fs } from 'fs';
-import { MappedTask, WrikeTask } from "./types";
 import dotenv from 'dotenv';
-
 dotenv.config();
 
-const { WRIKE_ACCESS_TOKEN, WRIKE_API_URL } = process.env;
+import { fetchFolders, fetchTasksForFolder } from "./requests";
+import { fetchAllUserDetails, mapTasksWithUserDetails, writeFile} from "./helpers";
 
-async function fetchAndMapTasks(): Promise<MappedTask[]> {
+const main = async () => {
     try {
-            const response = await axios.get<{ data: WrikeTask[] }>(WRIKE_API_URL!, {
-                headers: {Authorization: `Bearer ${WRIKE_ACCESS_TOKEN}`},
-                params: {
-                    fields: '[responsibleIds]'
-                },
-            });
+        const folders = await fetchFolders();
+        const tasksByFolder = await Promise.all(
+            folders.map(async folder => ({
+                folderId: folder.id,
+                tasks: await fetchTasksForFolder(folder.id),
+            }))
+        );
 
-            const mappedTasks: MappedTask[] = response?.data.data.map(task => ({
-                id: task.id,
-                name: task.title,
-                assignees: task.responsibleIds ?? [],
-                status: task.importance,
-                collections: task.parentIds ?? [],
-                created_at: task.createdDate,
-                updated_at: task.updatedDate,
-                ticket_url: task.permalink,
-            }));
+        const responsibleIdsSet = new Set<string>(
+            tasksByFolder.flatMap(({ tasks }) =>
+                tasks.flatMap(task =>
+                    Array.isArray(task.responsibleIds) ? task.responsibleIds : [task.responsibleIds]
+                )
+            )
+        );
 
-            await saveTasksToFile(mappedTasks);
-            return mappedTasks;
-        }
-    catch (error) {
-        handleError(error);
-        return [];
-    }
-}
+        const userMap = await fetchAllUserDetails(responsibleIdsSet);
+        const foldersWithMappedTasks = tasksByFolder.map(({ folderId, tasks }) => ({
+            id: folderId,
+            tasks: mapTasksWithUserDetails(tasks, userMap),
+        }));
 
-async function saveTasksToFile(tasks: MappedTask[]): Promise<void> {
-    try {
-        await fs.writeFile("tasks.json", JSON.stringify(tasks, null, 2));
-        console.log("Tasks have been saved to tasks.json");
+        await writeFile('folders.json', foldersWithMappedTasks);
     } catch (error) {
-        console.error("Failed to save tasks to file:", error);
+        console.error('Error in main execution:', error);
     }
-}
+};
 
-function handleError(error: unknown): void {
-    if (axios.isAxiosError(error)) {
-        console.error(`Error fetching tasks: ${error.response?.status} - ${error.response?.statusText}`);
-        if (error.response?.data) {
-            console.error("Response data:", error.response.data);
-        }
-    } else {
-        console.error(`An unexpected error occurred: ${error}`);
-    }
-}
-
-fetchAndMapTasks();
+main();
