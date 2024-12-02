@@ -1,8 +1,8 @@
 import dotenv from 'dotenv';
 dotenv.config();
 
-import { fetchFolders, fetchTasksForFolder } from "./requests";
-import { fetchAllUserDetails, mapTasksWithUserDetails, writeFile} from "./helpers";
+import {fetchFolders, fetchTasksForFolder, fetchContacts} from "./requests";
+import {  mapTasksWithUserDetails, writeFile} from "./helpers";
 
 const main = async () => {
     try {
@@ -13,22 +13,13 @@ const main = async () => {
                 tasks: await fetchTasksForFolder(folder.id),
             }))
         );
-
-        const responsibleIdsSet = new Set<string>(
-            tasksByFolder.flatMap(({ tasks }) =>
-                tasks.flatMap(task =>
-                    Array.isArray(task.responsibleIds) ? task.responsibleIds : [task.responsibleIds]
-                )
-            )
-        );
-
-        const userMap = await fetchAllUserDetails(responsibleIdsSet);
+        const userMap = await fetchContacts();
         const foldersWithMappedTasks = tasksByFolder.map(({ folderId, tasks }) => ({
             id: folderId,
             tasks: mapTasksWithUserDetails(tasks, userMap),
         }));
 
-        await writeFile('folders.json', foldersWithMappedTasks);
+         await writeFile('folders.json', foldersWithMappedTasks);
     } catch (error) {
         console.error('Error in main execution:', error);
     }

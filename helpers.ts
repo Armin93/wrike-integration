@@ -1,40 +1,69 @@
-import fs from 'fs';
-import util from 'util';
 import {Task, User} from "./types";
-import {fetchUserDetails} from "./requests";
+import fs from 'fs';
 
-const writeFileAsync = util.promisify(fs.writeFile);
+type NodeCallback<T> = (err: NodeJS.ErrnoException | null, result?: T) => void;
+
+const promisify = <T, A>(fn: (args: T, cb: NodeCallback<A>) => void): ((args: T) => Promise<A>) =>
+    (args: T) =>
+        new Promise((resolve, reject) => {
+            fn(args, (err, result) => {
+                if (err) reject(err);
+                else resolve(result as A);
+            });
+        });
+
+const writeFileAsync = promisify<{
+    path: fs.PathOrFileDescriptor,
+    data: string | NodeJS.ArrayBufferView,
+    options?: fs.WriteFileOptions
+}, void>((args, callback) => {
+    const { path, data, options = {} } = args;
+    fs.writeFile(path, data, options, callback);
+});
 
 export const writeFile = async (filePath: string, data: unknown): Promise<void> => {
     try {
         const formattedData = JSON.stringify(data, null, 2);
-        await writeFileAsync(filePath, formattedData);
+        await writeFileAsync({ path: filePath, data: formattedData, options: { encoding: 'utf8' } });
         console.log(`File written successfully to ${filePath}`);
     } catch (err) {
         console.error(`Error writing file to ${filePath}:`, err);
     }
 };
 
-export const fetchAllUserDetails = async (userIds: Set<string>): Promise<Map<string, User>> => {
-    const userDetails = await Promise.all(Array.from(userIds).map(fetchUserDetails));
-    return userDetails.flat().reduce((map, user) => {
-        if (user?.id) map.set(user.id, user);
-        return map;
-    }, new Map<string, User>());
-};
 
-export const mapTasksWithUserDetails = (tasks: Task[], userMap: Map<string, User>): { updated_at: string; collections: string[]; name: string; assignees: { firstName: string; lastName: string; companyName: string | undefined; id: string; email: string }[]; created_at: string; id: string; ticket_url: string; status: string }[] => {
+export const mapTasksWithUserDetails = (
+    tasks: Task[],
+    userMap: User | User[] | null
+): {
+    updated_at: string;
+    collections: string[];
+    name: string;
+    assignees: {
+        firstName: string;
+        lastName: string;
+        companyName: string | undefined;
+        id: string;
+        email: string;
+    }[];
+    created_at: string;
+    id: string;
+    ticket_url: string;
+    status: string;
+}[] => {
+    const normalizedUserMap = Array.isArray(userMap) ? userMap : userMap ? [userMap] : [];
+
     return tasks.map((task) => {
         const assignees = Array.isArray(task.responsibleIds) ? task.responsibleIds : [task.responsibleIds];
-        const assigneeDetails = assignees
-            .map(id => userMap.get(id))
-            .filter(Boolean)
+
+        const assigneeDetails = normalizedUserMap
+            .filter(user => assignees.includes(user.id))
             .map(user => ({
-                id: user!.id,
-                firstName: user!.firstName,
-                lastName: user!.lastName,
-                companyName: user!.companyName,
-                email: user!.primaryEmail,
+                id: user.id,
+                firstName: user.firstName,
+                lastName: user.lastName,
+                companyName: user.companyName,
+                email: user.primaryEmail,
             }));
 
         return {
